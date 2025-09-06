@@ -75,23 +75,87 @@ def download_audio(url, referer):
         return response.content
     return None
 
-def upload_to_0x0st(audio_data):
-    url = "https://0x0.st"
-    files = {"file": ("bilibili_audio.m4a", audio_data, "audio/m4a")}
+def upload_to_fileio(audio_data, expires=None, max_downloads=None, auto_delete=True):
+    """
+    上传音频数据到 file.io 并返回文件访问链接
+    
+    参数说明：
+    - audio_data: 音频二进制数据（如文件读取后的bytes对象）
+    - expires: 可选，文件过期时间（格式：符合file.io TimePeriod规范，如"7d"表示7天、"12h"表示12小时，默认无过期限制）
+    - max_downloads: 可选，文件最大下载次数（整数，默认无限制）
+    - auto_delete: 可选，是否在达到最大下载次数/过期后自动删除（布尔值，默认True）
+    
+    返回值：
+    - 成功：file.io 生成的文件访问链接（string）
+    - 失败：None
+    """
+    # 1. 配置 file.io 核心参数（参考API文档：https://www.file.io/developers）
+    FILE_IO_API_URL = "https://file.io"  # file.io 主服务地址
+    audio_filename = "bilibili_audio.m4a"  # 音频文件名（保持原函数命名逻辑）
+    audio_mime_type = "audio/m4a"  # 音频MIME类型
+    
+    # 2. 构造 multipart/form-data 请求体（file.io 要求的格式）
+    # 核心参数：file（二进制文件）、expires（过期时间）、maxDownloads（最大下载次数）、autoDelete（自动删除）
+    files = {
+        "file": (audio_filename, audio_data, audio_mime_type)  # 必选：音频文件数据
+    }
+    # 可选参数：仅在传入有效值时添加（避免传递默认空值导致接口重置）
+    data = {}
+    if expires:
+        data["expires"] = expires  # 示例："7d"（7天过期）、"24h"（24小时过期）
+    if max_downloads is not None and isinstance(max_downloads, int) and max_downloads > 0:
+        data["maxDownloads"] = max_downloads  # 示例：5（最多下载5次）
+    data["autoDelete"] = auto_delete  # 默认为True，符合file.io自动清理逻辑
+
     try:
-        response = requests.post(url, files=files, timeout=30)
+        # 3. 发送POST请求（file.io 仅支持POST上传，超时时间保留原函数30秒）
+        response = requests.post(
+            url=FILE_IO_API_URL,
+            files=files,
+            data=data,  # 传递可选参数（过期时间、下载次数等）
+            timeout=30,
+            headers={"Accept": "application/json"}  # 明确要求返回JSON格式响应
+        )
+        
+        # 4. 解析响应（file.io 返回JSON格式，包含success状态和fileDetails信息）
+        # 参考file.io API响应示例：{"success":true,"id":"xxx","key":"xxx","link":"https://file.io/xxx"...}
         if response.status_code == 200:
-            # 0x0.st 返回的是纯文本的 URL，直接 strip() 即可
-            link = response.text.strip()
-            if link.startswith("https://") or link.startswith("http://"):
-                return link
-            else:
-                st.error(f"无效的响应内容: {link}")
+            try:
+                response_json = response.json()
+                # 检查上传是否成功（file.io 用success字段标识）
+                if response_json.get("success"):
+                    file_link = response_json.get("link")
+                    # 验证链接有效性（确保是file.io生成的HTTPS链接）
+                    if file_link and file_link.startswith("https://file.io/"):
+                        st.success(f"文件上传成功！访问链接：{file_link}")
+                        # 可选：返回链接时附带过期时间/下载次数信息（便于后续管理）
+                        return file_link
+                    else:
+                        st.error(f"file.io 返回无效链接：{file_link}")
+                else:
+                    # 上传失败：提取错误信息（file.io 可能返回status和message字段）
+                    error_msg = response_json.get("message", "未知错误")
+                    st.error(f"file.io 上传失败：{error_msg}（状态码：{response_json.get('status')}）")
+            
+            except ValueError:
+                # 异常情况：响应不是JSON格式（file.io 标准接口不会出现，仅做容错）
+                st.error(f"file.io 响应格式异常，非JSON数据：{response.text[:100]}...")
+        
         else:
-            st.error(f"上传失败，HTTP状态码: {response.status_code}")
-    except Exception as e:
-        st.error(f"上传请求异常: {str(e)}")
+            # HTTP状态码非200：返回状态码和响应内容（便于排查问题）
+            st.error(
+                f"file.io 上传请求失败\n"
+                f"HTTP状态码：{response.status_code}\n"
+                f"响应内容：{response.text[:200]}..."  # 限制内容长度，避免日志过长
+            )
+    
+    except requests.exceptions.RequestException as e:
+        # 网络异常：如超时、连接失败等（保留原函数的异常捕获逻辑）
+        st.error(f"file.io 上传请求异常：{str(e)}")
+    
+    # 所有失败场景均返回None
     return None
+
 
 # Streamlit UI
 st.title("B站音频下载工具 🎵")
@@ -122,7 +186,7 @@ if st.button("生成音频链接"):
                                 st.error("音频下载失败，请重试")
                             else:
                                 st.info("音频已下载，正在上传...")
-                                file_link = upload_to_0x0st(audio_data)
+                                file_link = upload_to_fileio(audio_data)
                                 if file_link:
                                     st.success("✅ 音频已上传！")
                                     st.markdown(f"### 🔗 可访问的音频链接：\n\n{file_link}")
