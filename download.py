@@ -76,7 +76,7 @@ def download_audio(url, referer):
     return None
 
 
-def upload_to_fileio(
+def upload_to_fileio(audio_data: bytes):
     url = "https://0x0.st"
     files = {"file": ("bilibili_audio.m4a", audio_data, "audio/m4a")}
     try:
