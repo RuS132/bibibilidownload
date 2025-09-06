@@ -3,31 +3,50 @@ import requests
 import time
 from typing import Optional, Tuple  # 用于类型提示，提升代码可读性
 
-def upload_to_transfersh(audio_data: bytes, filename: str = "bilibili_audio.m4a", mime_type: str = "audio/m4a") -> Optional[str]:
-    """适配 transfer.sh 的上传函数，无需注册，支持大文件"""
-    API_URL = "https://transfer.sh"
-    files = {"file": (filename, audio_data, mime_type)}
+import requests
+import streamlit as st
+
+def upload_to_tmpfiles(audio_data: bytes, filename: str = "bilibili_audio.m4a", mime_type: str = "audio/m4a") -> Optional[str]:
+    """
+    上传音频到 tmpfiles.org（Streamlit Cloud 兼容）
+    返回：成功则为文件访问链接，失败则为 None
+    """
+    # tmpfiles.org 官方 API 端点（支持 multipart/form-data 上传）
+    API_URL = "https://tmpfiles.org/api/v1/upload"
+    
+    # 构造请求体（严格遵循 tmpfiles.org API 要求）
+    files = {
+        "file": (filename, audio_data, mime_type)  # 必选字段：文件二进制数据
+    }
+    # 可选参数：设置文件保留时间（默认 24 小时，支持 1h/6h/12h/24h/7d）
+    data = {"expiry": "7d"}  # 此处设置保留 7 天，可根据需求调整
     
     try:
-        st.info(f"正在上传音频到 transfer.sh（文件名：{filename}）...")
-        # transfer.sh 需在 URL 后拼接文件名（否则默认生成随机名）
+        st.info(f"正在上传音频到 tmpfiles.org（大小：{len(audio_data)/1024/1024:.1f}MB）...")
         response = requests.post(
-            url=f"{API_URL}/{filename}",
+            url=API_URL,
             files=files,
-            timeout=60,  # 适配大文件，延长超时时间
+            data=data,
+            timeout=60,  # 延长超时，适配大文件
             headers={"User-Agent": "BilibiliAudioUploader/1.0"}
         )
         
+        # 解析 tmpfiles.org 的 JSON 响应（规范且易处理）
         if response.status_code == 200:
-            file_link = response.text.strip()
-            # transfer.sh 链接格式为 "https://transfer.sh/xxx/filename"
-            if file_link.startswith("https://transfer.sh/"):
-                st.success(f"✅ 上传成功！\n访问链接：{file_link}")
-                return file_link
+            resp_json = response.json()
+            # 成功响应包含 "status": "success" 和 "data" 字段
+            if resp_json.get("status") == "success":
+                file_info = resp_json.get("data", {})
+                file_link = file_info.get("url")  # 提取直接访问链接
+                if file_link and file_link.startswith("https://"):
+                    st.success(f"✅ 上传成功！文件将保留 7 天")
+                    return file_link
+                else:
+                    st.error(f"❌ 未获取到有效链接：{file_info}")
             else:
-                st.error(f"❌ 返回无效链接：{file_link[:50]}...")
+                st.error(f"❌ 服务端拒绝：{resp_json.get('message', '未知错误')}")
         else:
-            st.error(f"❌ 上传失败（HTTP {response.status_code}）：{response.text.strip()}")
+            st.error(f"❌ HTTP 错误 {response.status_code}：{response.text[:100]}...")
     
     except Exception as e:
         st.error(f"❌ 上传异常：{str(e)}")
@@ -147,22 +166,13 @@ if st.button("生成音频链接"):
                             if not audio_data:
                                 st.error("音频下载失败，请重试")
                             else:
-                                st.info(f"音频已下载（大小：{len(audio_data)/1024/1024:.1f}MB），正在上传到 0x0.st...")
-                                # 调用重写后的 0x0.st 上传函数
-                                # 调用 transfer.sh 上传函数（无需过期时间/秘密URL参数，服务默认保留14天）
-                                file_link = upload_to_transfersh(audio_data=audio_data)
+                                st.info(f"音频已下载（大小：{len(audio_data)/1024/1024:.1f}MB），正在上传...")
+                                # 调用 tmpfiles.org 上传函数
+                                file_link = upload_to_tmpfiles(audio_data=audio_data)
                                 if file_link:
                                     st.success("✅ 音频处理完成！")
-                                    # 展示结果（补充 0x0.st 专属提示）
                                     st.markdown(f"### 🔗 可访问的音频链接：\n\n{file_link}")
                                     st.markdown(f"[点击下载音频]({file_link})")
-                                    # 显示管理令牌（便于用户后续删除文件）
-                                    if manage_token:
-                                        st.markdown(f"### 🔑 文件管理令牌（请保存）：\n\n`{manage_token}`")
-                                        st.caption("提示：使用令牌可通过 0x0.st API 删除文件或修改过期时间")
-                                    # 计算并显示过期时间（提升用户感知）
-                                    expire_time = time.strftime("%Y-%m-%d %H:%M:%S", 
-                                                              time.localtime(time.time() + expires_hours * 3600))
-                                    st.caption(f"⚠️ 注意：此链接将在 {expire_time} 过期（{expires_hours} 小时后），过期后文件自动删除")
+                                    st.caption("⚠️ 注意：文件保留 7 天，过期后自动删除。")
                                 else:
                                     st.error("文件上传失败，请稍后重试。")
