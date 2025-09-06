@@ -3,6 +3,7 @@ import requests
 import re
 import time
 import hashlib
+from typing import Optional
 
 def extract_bvid(url):
     match = re.search(r'(BV[\w]+)', url)
@@ -75,90 +76,166 @@ def download_audio(url, referer):
         return response.content
     return None
 
-def upload_to_fileio(audio_data, expires=None, max_downloads=None, auto_delete=True):
+def upload_to_fileio(
+    audio_data: bytes,
+    audio_filename: str = "bilibili_audio.m4a",
+    audio_mime_type: str = "audio/m4a",
+    expires: Optional[str] = None,
+    max_downloads: Optional[int] = None,
+    auto_delete: bool = True,
+    retry_count: int = 2  # 临时错误重试次数
+) -> Optional[str]:
     """
-    上传音频数据到 file.io 并返回文件访问链接
+    优化版 file.io 音频上传函数：补充参数校验、异常解析、重试机制
     
     参数说明：
-    - audio_data: 音频二进制数据（如文件读取后的bytes对象）
-    - expires: 可选，文件过期时间（格式：符合file.io TimePeriod规范，如"7d"表示7天、"12h"表示12小时，默认无过期限制）
-    - max_downloads: 可选，文件最大下载次数（整数，默认无限制）
-    - auto_delete: 可选，是否在达到最大下载次数/过期后自动删除（布尔值，默认True）
+    - audio_data: 音频二进制数据（必须非空）
+    - audio_filename: 音频文件名（默认保留原命名）
+    - audio_mime_type: 音频MIME类型（确保与文件格式匹配，如m4a对应audio/m4a）
+    - expires: 文件过期时间（需符合file.io TimePeriod规范，如"7d"=7天、"12h"=12小时，None表示无限制）
+    - max_downloads: 最大下载次数（正整数，None表示无限制）
+    - auto_delete: 过期/达下载次数后自动删除（bool，默认True）
+    - retry_count: 临时错误重试次数（默认2次，避免网络波动导致失败）
     
     返回值：
-    - 成功：file.io 生成的文件访问链接（string）
+    - 成功：file.io 文件访问链接（str）
     - 失败：None
     """
-    # 1. 配置 file.io 核心参数（参考API文档：https://www.file.io/developers）
-    FILE_IO_API_URL = "https://file.io"  # file.io 主服务地址
-    audio_filename = "bilibili_audio.m4a"  # 音频文件名（保持原函数命名逻辑）
-    audio_mime_type = "audio/m4a"  # 音频MIME类型
+    # 1. 前置参数校验（避免无效请求）
+    if not audio_data:
+        st.error("错误：音频数据为空，无法上传")
+        return None
+    if len(audio_data) > 5 * 1024 * 1024 * 1024:  # 临时限制：file.io 免费版通常≤5GB（需参考官方最新政策）
+        st.error(f"错误：文件大小超过5GB（当前{len(audio_data)/1024/1024:.1f}MB），无法上传")
+        return None
     
-    # 2. 构造 multipart/form-data 请求体（file.io 要求的格式）
-    # 核心参数：file（二进制文件）、expires（过期时间）、maxDownloads（最大下载次数）、autoDelete（自动删除）
-    files = {
-        "file": (audio_filename, audio_data, audio_mime_type)  # 必选：音频文件数据
+    # 2. 配置 file.io 基础信息
+    FILE_IO_API_URL = "https://file.io"
+    # 规范请求头：明确 User-Agent（避免被判定为非法请求）、Accept（要求JSON响应）
+    headers = {
+        "User-Agent": "AudioUploader/1.0 (https://your-app-url.com; contact@your-email.com)",  # 替换为你的应用标识
+        "Accept": "application/json"  # 强制要求服务端返回JSON格式
     }
-    # 可选参数：仅在传入有效值时添加（避免传递默认空值导致接口重置）
+    
+    # 3. 构造请求体（严格遵循file.io multipart/form-data格式）
+    files = {
+        "file": (audio_filename, audio_data, audio_mime_type)  # 必选：file字段（名称、数据、MIME类型）
+    }
     data = {}
+    # 可选参数：仅传递有效值（避免空值导致接口解析错误）
     if expires:
-        data["expires"] = expires  # 示例："7d"（7天过期）、"24h"（24小时过期）
-    if max_downloads is not None and isinstance(max_downloads, int) and max_downloads > 0:
-        data["maxDownloads"] = max_downloads  # 示例：5（最多下载5次）
-    data["autoDelete"] = auto_delete  # 默认为True，符合file.io自动清理逻辑
-
-    try:
-        # 3. 发送POST请求（file.io 仅支持POST上传，超时时间保留原函数30秒）
-        response = requests.post(
-            url=FILE_IO_API_URL,
-            files=files,
-            data=data,  # 传递可选参数（过期时间、下载次数等）
-            timeout=30,
-            headers={"Accept": "application/json"}  # 明确要求返回JSON格式响应
-        )
-        
-        # 4. 解析响应（file.io 返回JSON格式，包含success状态和fileDetails信息）
-        # 参考file.io API响应示例：{"success":true,"id":"xxx","key":"xxx","link":"https://file.io/xxx"...}
-        if response.status_code == 200:
-            try:
-                response_json = response.json()
-                # 检查上传是否成功（file.io 用success字段标识）
-                if response_json.get("success"):
-                    file_link = response_json.get("link")
-                    # 验证链接有效性（确保是file.io生成的HTTPS链接）
-                    if file_link and file_link.startswith("https://file.io/"):
-                        st.success(f"文件上传成功！访问链接：{file_link}")
-                        # 可选：返回链接时附带过期时间/下载次数信息（便于后续管理）
-                        return file_link
-                    else:
-                        st.error(f"file.io 返回无效链接：{file_link}")
-                else:
-                    # 上传失败：提取错误信息（file.io 可能返回status和message字段）
-                    error_msg = response_json.get("message", "未知错误")
-                    st.error(f"file.io 上传失败：{error_msg}（状态码：{response_json.get('status')}）")
-            
-            except ValueError:
-                # 异常情况：响应不是JSON格式（file.io 标准接口不会出现，仅做容错）
-                st.error(f"file.io 响应格式异常，非JSON数据：{response.text[:100]}...")
-        
+        # 校验 expires 格式（符合file.io TimePeriod规范：数字+单位，如1y/1Q/1M/1w/1d/1h/1m/1s）
+        valid_units = {"y", "Q", "M", "w", "d", "h", "m", "s"}
+        if not (expires[:-1].isdigit() and expires[-1] in valid_units):
+            st.error(f"错误：expires格式无效（{expires}），需符合如'7d'（7天）、'12h'（12小时）的规范")
+            return None
+        data["expires"] = expires
+    if max_downloads is not None:
+        if isinstance(max_downloads, int) and max_downloads > 0:
+            data["maxDownloads"] = max_downloads
         else:
-            # HTTP状态码非200：返回状态码和响应内容（便于排查问题）
-            st.error(
-                f"file.io 上传请求失败\n"
-                f"HTTP状态码：{response.status_code}\n"
-                f"响应内容：{response.text[:200]}..."  # 限制内容长度，避免日志过长
+            st.error(f"错误：max_downloads必须为正整数（当前{max_downloads}）")
+            return None
+    data["autoDelete"] = auto_delete  # 布尔值需正确传递（requests会自动处理格式）
+
+    # 4. 发送请求（带重试机制）
+    for attempt in range(retry_count + 1):
+        try:
+            st.info(f"正在上传（第{attempt+1}/{retry_count+1}次尝试）...")
+            response = requests.post(
+                url=FILE_IO_API_URL,
+                files=files,
+                data=data,
+                headers=headers,
+                timeout=30,  # 超时时间保留30秒，避免长期阻塞
+                verify=True  # 启用SSL证书验证（防止中间人攻击，file.io支持HTTPS）
             )
+            
+            # 5. 响应解析（分场景处理：JSON正常响应、HTML错误响应、其他异常）
+            # 场景1：HTTP状态码200（尝试解析JSON）
+            if response.status_code == 200:
+                # 优先尝试JSON解析（符合file.io标准接口）
+                try:
+                    resp_json = response.json()
+                    if resp_json.get("success"):
+                        file_link = resp_json.get("link")
+                        if file_link and file_link.startswith("https://file.io/"):
+                            st.success(f"上传成功！\n链接：{file_link}\n过期时间：{resp_json.get('expires', '无限制')}\n最大下载次数：{resp_json.get('maxDownloads', '无限制')}")
+                            return file_link
+                        else:
+                            st.error(f"错误：file.io 返回无效链接：{file_link}")
+                            break  # 链接无效，无需重试
+                    else:
+                        # JSON格式但上传失败（提取服务端错误信息）
+                        error_msg = resp_json.get("message", "未知错误")
+                        error_status = resp_json.get("status", "未知状态")
+                        st.error(f"上传失败（服务端拒绝）：{error_msg}（状态码：{error_status}）")
+                        # 判断是否需要重试：临时错误（如限流）可重试，永久错误（如参数无效）不重试
+                        if error_status in [429]:  # 429通常为限流（Too Many Requests）
+                            if attempt < retry_count:
+                                st.info(f"将在5秒后重试（限流临时错误）...")
+                                time.sleep(5)  # 等待5秒后重试，避免频繁请求
+                            else:
+                                st.error(f"已达最大重试次数（{retry_count+1}次），请稍后再试")
+                                break
+                        else:
+                            break  # 永久错误（如参数无效），无需重试
+                
+                # 场景2：响应不是JSON（返回HTML，可能是服务端临时错误）
+                except ValueError:
+                    # 解析HTML中的错误提示（提取<body>内容，排除标签）
+                    from bs4 import BeautifulSoup  # 需安装：pip install beautifulsoup4
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    error_text = soup.get_text(strip=True)[:200]  # 提取纯文本并限制长度
+                    st.error(f"响应格式异常（非JSON）：{error_text}...")
+                    # 临时错误（如服务端维护）可重试，否则终止
+                    if attempt < retry_count:
+                        st.info(f"将在10秒后重试（服务端临时异常）...")
+                        time.sleep(10)
+                    else:
+                        st.error(f"已达最大重试次数，仍无法获取有效响应")
+                        break
+            
+            # 场景3：HTTP状态码非200（如400参数错误、413文件过大、429限流）
+            else:
+                st.error(f"请求失败（HTTP状态码：{response.status_code}）")
+                # 解析非200状态码的响应内容（可能是HTML或纯文本）
+                try:
+                    # 尝试解析JSON错误（部分场景服务端会返回）
+                    resp_json = response.json()
+                    st.error(f"服务端错误信息：{resp_json.get('message', '无')}")
+                except ValueError:
+                    # 解析HTML错误文本
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    error_text = soup.get_text(strip=True)[:200]
+                    st.error(f"错误详情：{error_text}...")
+                # 判断是否重试：429（限流）、5xx（服务端错误）可重试，4xx（客户端错误）不重试
+                if response.status_code in [429, 500, 502, 503, 504] and attempt < retry_count:
+                    wait_time = 5 * (attempt + 1)  # 重试间隔递增（5s、10s、15s...）
+                    st.info(f"将在{wait_time}秒后重试（{response.status_code}临时错误）...")
+                    time.sleep(wait_time)
+                else:
+                    break  # 客户端错误（如400、413）或无重试次数，终止
     
-    except requests.exceptions.RequestException as e:
-        # 网络异常：如超时、连接失败等（保留原函数的异常捕获逻辑）
-        st.error(f"file.io 上传请求异常：{str(e)}")
+        # 场景4：网络异常（如超时、连接失败）
+        except requests.exceptions.RequestException as e:
+            st.error(f"请求异常：{str(e)}")
+            if attempt < retry_count:
+                wait_time = 5 * (attempt + 1)
+                st.info(f"将在{wait_time}秒后重试（网络异常）...")
+                time.sleep(wait_time)
+            else:
+                st.error(f"已达最大重试次数，网络异常仍未解决")
+                break
     
-    # 所有失败场景均返回None
+    # 所有尝试失败后返回None
+    st.error("文件上传最终失败，请检查参数或稍后重试")
     return None
 
 
 # Streamlit UI
-st.title("B站音频下载工具 🎵")
+st.title("B站音频下载工具 1🎵")
 st.write("输入B站视频链接，获取音频文件的可访问链接")
 
 video_url = st.text_input("视频链接：", placeholder="https://www.bilibili.com/video/BV...")
