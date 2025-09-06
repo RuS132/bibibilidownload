@@ -3,6 +3,68 @@ import requests
 import re
 import time
 import hashlib
+from aliyunsdkcore.client import AcsClient
+from aliyunsdkcore.request import CommonRequest
+from aliyunsdkcore.auth.credentials import AccessKeyCredential
+import os
+import json
+import datetime
+
+
+
+# 配置阿里云Access Key ID和Secret
+os.environ['ALIBABA_CLOUD_ACCESS_KEY_ID'] = ''
+os.environ['ALIBABA_CLOUD_ACCESS_KEY_SECRET'] = '
+
+# 新增函数：创建阿里听悟任务
+def create_tingwu_task(file_url):
+    credentials = AccessKeyCredential(os.environ['ALIBABA_CLOUD_ACCESS_KEY_ID'], os.environ['ALIBABA_CLOUD_ACCESS_KEY_SECRET'])
+    client = AcsClient(region_id='cn-beijing', credential=credentials)
+    
+    body = {
+        "AppKey": "",
+        "Input": {
+            "SourceLanguage": "cn",  # 根据实际情况调整
+            "TaskKey": "task" + datetime.datetime.now().strftime('%Y%m%d%H%M%S'),
+            "FileUrl": file_url,
+        },
+        "Parameters": {
+            "SummarizationEnabled": True,
+            "Summarization": {
+                "Types": ["MindMap"]
+            }
+        }
+    }
+
+    request = CommonRequest()
+    request.set_accept_format('json')
+    request.set_domain('tingwu.cn-beijing.aliyuncs.com')
+    request.set_version('2023-09-30')
+    request.set_protocol_type('https')
+    request.set_method('PUT')
+    request.set_uri_pattern('/openapi/tingwu/v2/tasks')
+    request.add_query_param('type', 'offline')
+    request.set_content(json.dumps(body).encode('utf-8'))
+    
+    response = client.do_action_with_exception(request)
+    return json.loads(response)
+
+# 新增函数：查询任务状态
+def check_tingwu_task(task_id):
+    credentials = AccessKeyCredential(os.environ['ALIBABA_CLOUD_ACCESS_KEY_ID'], os.environ['ALIBABA_CLOUD_ACCESS_KEY_SECRET'])
+    client = AcsClient(region_id='cn-beijing', credential=credentials)
+    
+    request = CommonRequest()
+    request.set_accept_format('json')
+    request.set_domain('tingwu.cn-beijing.aliyuncs.com')
+    request.set_version('2023-09-30')
+    request.set_protocol_type('https')
+    request.set_method('GET')
+    request.set_uri_pattern(f'/openapi/tingwu/v2/tasks/{task_id}')
+    
+    response = client.do_action_with_exception(request)
+    return json.loads(response)
+
 
 def extract_bvid(url):
     match = re.search(r'(BV[\w]+)', url)
@@ -132,5 +194,27 @@ if st.button("生成音频链接"):
                                     st.markdown(f"### 🔗 可访问的音频链接：\n\n{file_link}")
                                     st.markdown(f"[点击下载音频]({file_link})")
                                     st.caption("注意：此链接由 catbox.moe 提供，长期有效（除非被举报删除）。")
+                                    st.info("音频已上传，正在提交阿里听悟任务...")
+                                    task_response = create_tingwu_task(file_link)
+                                    task_id = task_response.get('Data', {}).get('TaskId')
+                                    
+                                    if task_id:
+                                        with st.spinner("等待阿里听悟任务完成..."):
+                                            while True:
+                                                time.sleep(60)  # 每分钟检查一次任务状态
+                                                task_status_response = check_tingwu_task(task_id)
+                                                task_status = task_status_response.get('Data', {}).get('TaskStatus')
+                                                
+                                                if task_status == 'COMPLETED':
+                                                    result_urls = task_status_response.get('Data', {}).get('Result', {})
+                                                    mindmap_url = result_urls.get('Summarization') if isinstance(result_urls, dict) else None
+                                                    
+                                                    if mindmap_url:
+                                                        st.success("✅ 思维导图已生成！")
+                                                        st.markdown(f"### 🔗 可访问的思维导图链接：\n\n{mindmap_url}")
+                                                    break
+                                                elif task_status == 'FAILED':
+                                                    st.error("阿里听悟任务失败，请重试。")
+                                                    break
                                 else:
                                     st.error("文件上传失败，请稍后重试。")
