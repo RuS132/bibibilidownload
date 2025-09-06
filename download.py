@@ -4,57 +4,37 @@ import re
 import time
 import hashlib
 
-# --- 核心功能函数 ---
-
 def extract_bvid(url):
-    """从B站链接中提取BV号"""
     match = re.search(r'(BV[\w]+)', url)
     return match.group(1) if match else None
 
 def get_cid(bvid):
-    """通过bvid获取cid"""
     url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            if data["code"] == 0:
-                return data["data"]["cid"]
-    except Exception as e:
-        st.warning(f"获取CID时出错: {e}")
+    response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    if response.status_code == 200:
+        return response.json()["data"]["cid"]
     return None
 
 def get_wbi_keys():
-    """获取WBI签名所需的img_key和sub_key"""
     nav_url = "https://api.bilibili.com/x/web-interface/nav"
-    try:
-        response = requests.get(nav_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            if data["code"] == 0:
-                wbi_img = data["data"]["wbi_img"]
-                img_key = wbi_img["img_url"].split("/")[-1].split(".")[0]
-                sub_key = wbi_img["sub_url"].split("/")[-1].split(".")[0]
-                return img_key, sub_key
-    except Exception as e:
-        st.warning(f"获取WBI密钥失败: {e}")
+    response = requests.get(nav_url, headers={"User-Agent": "Mozilla/5.0"})
+    if response.status_code == 200:
+        wbi_img = response.json()["data"]["wbi_img"]
+        img_key = wbi_img["img_url"].split("/")[-1].split(".")[0]
+        sub_key = wbi_img["sub_url"].split("/")[-1].split(".")[0]
+        return img_key, sub_key
     return None, None
 
 def generate_wbi_sign(params, img_key, sub_key):
-    """生成WBI签名"""
     mix_key = img_key + sub_key
-    # 参数按字典序排序
-    sorted_params = dict(sorted(params.items()))
-    param_str = "&".join([f"{k}={v}" for k, v in sorted_params.items()])
-    sign_content = param_str + mix_key
-    return hashlib.md5(sign_content.encode()).hexdigest()
+    params = dict(sorted(params.items()))
+    params_str = "&".join([f"{k}={v}" for k, v in params.items()])
+    sign_str = params_str + mix_key
+    return hashlib.md5(sign_str.encode()).hexdigest()
 
 def get_audio_url(bvid, cid):
-    """获取音频直链（带WBI签名）"""
     img_key, sub_key = get_wbi_keys()
     if not img_key or not sub_key:
-        st.error("无法获取WBI密钥，请稍后重试。")
         return None
 
     wts = int(time.time())
@@ -67,116 +47,90 @@ def get_audio_url(bvid, cid):
         "fourk": 1,
         "wts": wts
     }
-
-    # 生成 w_rid 签名
+    
     params["w_rid"] = generate_wbi_sign(params, img_key, sub_key)
-
     url = "https://api.bilibili.com/x/player/wbi/playurl"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": f"https://www.bilibili.com/video/{bvid}"
-    }
-
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            if data["code"] == 0:
-                dash = data["data"]["dash"]
-                audio_list = dash.get("audio")
-                if audio_list:
-                    return audio_list[0]["baseUrl"]
-    except Exception as e:
-        st.warning(f"获取音频地址失败: {e}")
+    
+    response = requests.get(
+        url,
+        params=params,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+            "Referer": f"https://www.bilibili.com/video/{bvid}"
+        }
+    )
+    
+    if response.status_code == 200:
+        data = response.json()
+        return data["data"]["dash"]["audio"][0]["baseUrl"]
     return None
 
-def download_audio(audio_url, referer):
-    """下载音频数据"""
+def download_audio(url, referer):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
         "Referer": referer
     }
-    try:
-        response = requests.get(audio_url, headers=headers, stream=True, timeout=30)
-        if response.status_code == 200:
-            # 读取前 10KB 检查是否为有效音频（防止防盗链返回HTML）
-            chunk = next(iter(response.iter_content(10240)))
-            if chunk.startswith(b"<html") or b"403" in chunk or b"error" in chunk.lower():
-                st.error("音频请求被拒绝（可能防盗链或权限问题）")
-                return None
-            return response.content
-    except Exception as e:
-        st.error(f"下载音频时出错: {str(e)}")
+    response = requests.get(url, headers=headers, stream=True)
+    if response.status_code == 200:
+        return response.content
     return None
 
-def upload_to_tmpfiles(audio_data):
-    """上传音频到 tmpfiles.org"""
-    url = "https://tmpfiles.org/api/v1/upload"
+def upload_to_catbox(audio_data):
+    url = "https://catbox.moe/user/api.php"
     files = {
-        "file": ("bilibili_audio.m4a", audio_data, "audio/m4a")
+        "fileToUpload": ("bilibili_audio.m4a", audio_data, "audio/m4a")
+    }
+    data = {
+        "reqtype": "fileupload",
+        "userhash": ""  # 可留空，除非你有注册 userhash
     }
     try:
-        response = requests.post(url, files=files, timeout=30)
-        if response.status_code == 200:
-            try:
-                result = response.json()
-                if result.get("success"):
-                    return result["data"]["url"]
-                else:
-                    st.error("上传失败：" + str(result))
-            except requests.exceptions.JSONDecodeError:
-                st.error("上传失败：服务器返回非JSON内容（可能是服务不可用或被屏蔽）")
-                st.text(f"原始响应内容：\n{response.text}")
+        response = requests.post(url, data=data, files=files, timeout=30)
+        # catbox 返回的是纯文本 URL，不是 JSON！
+        if response.status_code == 200 and response.text.strip():
+            return response.text.strip()  # 直接返回 URL 字符串
         else:
-            st.error(f"上传失败，HTTP状态码: {response.status_code}")
-    except requests.exceptions.RequestException as e:
-        st.error(f"网络请求错误: {str(e)}")
+            st.error(f"上传失败：HTTP {response.status_code}")
+            st.debug(response.text)
     except Exception as e:
-        st.error(f"未知错误: {str(e)}")
+        st.error(f"网络错误：{str(e)}")
     return None
 
+# Streamlit UI
+st.title("B站音频下载工具 🎵")
+st.write("输入B站视频链接，获取音频文件的可访问链接")
 
-# --- Streamlit UI 主界面 ---
+video_url = st.text_input("视频链接：", placeholder="https://www.bilibili.com/video/BV...")
 
-st.title("B站音频提取工具 🎧")
-st.markdown("输入B站视频链接，自动提取音频并生成可分享的 **HTTPS 下载链接**")
-
-video_url = st.text_input(
-    "请输入B站视频链接：",
-    placeholder="https://www.bilibili.com/video/BV1xx411c7..."
-)
-
-if st.button("🚀 提取音频并生成链接"):
-    if not video_url.strip():
-        st.error("请先输入有效的B站视频链接！")
+if st.button("生成音频链接"):
+    if not video_url:
+        st.error("请输入有效的视频链接")
     else:
-        with st.spinner("🔍 正在解析视频信息..."):
-            bvid = extract_bvid(video_url)
-            if not bvid:
-                st.error("❌ 无法识别BV号，请确认链接是否为B站视频页。")
-            else:
+        bvid = extract_bvid(video_url)
+        if not bvid:
+            st.error("链接格式不正确，请确认是B站视频链接")
+        else:
+            with st.spinner("解析视频信息中..."):
                 cid = get_cid(bvid)
                 if not cid:
-                    st.error("❌ 无法获取视频信息，请检查链接是否正确或稍后重试。")
+                    st.error("无法获取视频信息，请检查链接是否正确")
                 else:
-                    with st.spinner("🎧 正在获取音频地址..."):
-                        audio_url = get_audio_url(bvid, cid)
-                        if not audio_url:
-                            st.error("❌ 无法获取音频下载地址，可能该视频无音频或受权限限制。")
-                        else:
-                            referer = f"https://www.bilibili.com/video/{bvid}"
-                            with st.spinner("⏬ 正在下载音频数据..."):
-                                audio_data = download_audio(audio_url, referer)
-                                if not audio_data:
-                                    st.error("❌ 音频下载失败。")
+                    audio_url = get_audio_url(bvid, cid)
+                    if not audio_url:
+                        st.error("无法获取音频地址，可能视频不支持")
+                    else:
+                        # 原调用部分修改如下：
+                        with st.spinner("正在下载并上传音频..."):
+                            audio_data = download_audio(audio_url, video_url)
+                            if not audio_data:
+                                st.error("音频下载失败，请重试")
+                            else:
+                                st.info("音频已下载，正在上传到 catbox.moe...")
+                                file_link = upload_to_catbox(audio_data)
+                                if file_link:
+                                    st.success("✅ 音频已上传！")
+                                    st.markdown(f"### 🔗 可访问的音频链接：\n\n{file_link}")
+                                    st.markdown(f"[点击下载音频]({file_link})")
+                                    st.caption("注意：此链接由 catbox.moe 提供，长期有效（除非被举报删除）。")
                                 else:
-                                    st.info("📤 正在上传到 tmpfiles.org...")
-                                    file_link = upload_to_tmpfiles(audio_data)
-                                    if file_link:
-                                        st.success("✅ 上传成功！")
-                                        st.markdown("### 🔗 音频下载链接")
-                                        st.markdown(f"[📥 点击下载音频]({file_link})")
-                                        st.code(file_link, language="text")
-                                        st.caption("提示：链接由 tmpfiles.org 提供，通常保留30天。")
-                                    else:
-                                        st.error("❌ 文件上传失败，请稍后重试。")
+                                    st.error("文件上传失败，请稍后重试。")
