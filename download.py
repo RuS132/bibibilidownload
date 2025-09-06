@@ -75,13 +75,27 @@ def download_audio(url, referer):
         return response.content
     return None
 
+# 新增：上传到 file.io
+def upload_to_fileio(audio_data):
+    url = "https://file.io/"
+    files = {"file": ("bilibili_audio.m4a", audio_data, "audio/m4a")}
+    try:
+        response = requests.post(url, files=files, timeout=30)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("success"):
+                return result["link"]  # 返回 HTTPS 链接
+    except Exception as e:
+        st.error(f"上传失败: {str(e)}")
+    return None
+
 # Streamlit UI
 st.title("B站音频下载工具 🎵")
-st.write("输入B站视频链接，下载音频文件")
+st.write("输入B站视频链接，获取音频文件的可访问链接")
 
 video_url = st.text_input("视频链接：", placeholder="https://www.bilibili.com/video/BV...")
 
-if st.button("下载音频"):
+if st.button("生成音频链接"):
     if not video_url:
         st.error("请输入有效的视频链接")
     else:
@@ -98,15 +112,17 @@ if st.button("下载音频"):
                     if not audio_url:
                         st.error("无法获取音频地址，可能视频不支持")
                     else:
-                        with st.spinner("下载音频文件中..."):
+                        with st.spinner("正在下载并上传音频..."):
                             audio_data = download_audio(audio_url, video_url)
-                            if audio_data:
-                                st.success("音频下载准备就绪！")
-                                st.download_button(
-                                    label="保存音频文件",
-                                    data=audio_data,
-                                    file_name="bilibili_audio.m4a",
-                                    mime="audio/m4a"
-                                )
-                            else:
+                            if not audio_data:
                                 st.error("音频下载失败，请重试")
+                            else:
+                                st.info("音频已下载，正在上传...")
+                                file_link = upload_to_fileio(audio_data)
+                                if file_link:
+                                    st.success("✅ 音频已上传！")
+                                    st.markdown(f"### 🔗 可访问的音频链接：\n\n{file_link}")
+                                    st.markdown(f"[点击下载音频]({file_link})")
+                                    st.caption("注意：此链接由 file.io 提供，默认14天后失效。")
+                                else:
+                                    st.error("文件上传失败，请稍后重试。")
