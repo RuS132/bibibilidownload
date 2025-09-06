@@ -75,18 +75,22 @@ def download_audio(url, referer):
         return response.content
     return None
 
-# 新增：上传到 file.io
-def upload_to_fileio(audio_data):
-    url = "https://file.io/"
+def upload_to_0x0st(audio_data):
+    url = "https://0x0.st"
     files = {"file": ("bilibili_audio.m4a", audio_data, "audio/m4a")}
     try:
         response = requests.post(url, files=files, timeout=30)
         if response.status_code == 200:
-            result = response.json()
-            if result.get("success"):
-                return result["link"]  # 返回 HTTPS 链接
+            # 0x0.st 返回的是纯文本的 URL，直接 strip() 即可
+            link = response.text.strip()
+            if link.startswith("https://") or link.startswith("http://"):
+                return link
+            else:
+                st.error(f"无效的响应内容: {link}")
+        else:
+            st.error(f"上传失败，HTTP状态码: {response.status_code}")
     except Exception as e:
-        st.error(f"上传失败: {str(e)}")
+        st.error(f"上传请求异常: {str(e)}")
     return None
 
 # Streamlit UI
@@ -118,7 +122,7 @@ if st.button("生成音频链接"):
                                 st.error("音频下载失败，请重试")
                             else:
                                 st.info("音频已下载，正在上传...")
-                                file_link = upload_to_fileio(audio_data)
+                                file_link = upload_to_0x0st(audio_data)
                                 if file_link:
                                     st.success("✅ 音频已上传！")
                                     st.markdown(f"### 🔗 可访问的音频链接：\n\n{file_link}")
