@@ -67,39 +67,19 @@ def get_bilibili_video_info(url):
 
 
 def download_file(url, filename, desc="下载中"):
-    """下载单个文件，带进度条，修复 NoneType 错误"""
     try:
+        st.info(f"📥 正在下载 {desc}...")
         with requests.get(url, headers=HEADERS, stream=True, timeout=30) as r:
             r.raise_for_status()
-            total_size = int(r.headers.get('content-length', 0))
-            block_size = 1024
-            downloaded = 0
-
-            # 在函数内确保 bar 不为 None
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
             with open(filename, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=block_size):
-                    if chunk:  # 过滤空 chunk
+                for chunk in r.iter_content(chunk_size=1024):
+                    if chunk:
                         f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = downloaded / total_size
-                            progress_bar.progress(min(int(percent * 100), 100))
-                            status_text.text(f"{desc}... {downloaded // 1024} KB / {total_size // 1024} KB")
-            # 下载完成
-            progress_bar.progress(100)
-            status_text.text(f"{desc}完成！")
-            time.sleep(0.5)
-            status_text.empty()
-            progress_bar.empty()
-            return True
+        st.success(f"✅ {desc}完成！")
+        return True
     except Exception as e:
-        logging.error(f"下载失败 {url}: {e}")
         st.error(f"❌ 下载失败: {e}")
         return False
-
 
 def merge_video_audio(video_path, audio_path, output_path):
     """合并视频与音频"""
