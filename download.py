@@ -81,23 +81,29 @@ def download_file(url, filename, desc="下载中"):
         return False
 
 def merge_video_audio(video_path, audio_path, output_path):
-    """使用 ffmpeg 快速合并视频与音频"""
+    """使用 ffmpeg 安全合并音视频"""
     try:
         st.info("⚡ 正在使用 FFmpeg 高速合并音视频...")
-        (
-            ffmpeg
-            .input(video_path)
-            .input(audio_path)
-            .output(
-                output_path,
-                vcodec='libx264',      # 视频编码
-                acodec='aac',          # 音频编码
-                loglevel='quiet'       # 不输出冗余日志
-            )
-            .run(overwrite_output=True, timeout=60)  # 设置超时防止卡死
+
+        # 明确使用 input
+        video_stream = ffmpeg.input(video_path)
+        audio_stream = ffmpeg.input(audio_path)
+
+        # 构建输出流
+        stream = ffmpeg.output(
+            video_stream, audio_stream,
+            output_path,
+            vcodec='libx264',
+            acodec='aac',
+            loglevel='quiet'
         )
+
+        # 执行
+        ffmpeg.run(stream, overwrite_output=True, timeout=60)
+
         st.success("✅ 合并完成！")
         return True
+
     except Exception as e:
         logging.error(f"合并失败: {e}")
         st.error(f"❌ 合并失败: {e}")
