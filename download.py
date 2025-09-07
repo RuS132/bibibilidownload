@@ -119,9 +119,6 @@ def merge_video_audio(video_path, audio_path, output_path):
 
 
 # ================ Streamlit 主界面 =================
-import streamlit as st
-import os
-
 # 设置页面配置
 st.set_page_config(page_title="B站视频下载器", page_icon="🎬", layout="centered")
 
@@ -150,7 +147,8 @@ with col2:
     if st.button("💖 打赏支持"):
         show_donate()
 
-# 主要说明
+
+
 st.markdown("""
 > 输入 B站视频链接（如 `https://www.bilibili.com/video/BVxxxx`），自动下载并合并高清音视频。
 >
@@ -159,10 +157,8 @@ st.markdown("""
 > - 请勿用于商业或批量下载，遵守 B站 用户协议。
 """)
 
-# 输入链接
 url = st.text_input("请输入B站视频链接：", placeholder="https://www.bilibili.com/video/BV1nb421B7Y5")
 
-# 解析视频信息
 if st.button("🔍 解析视频信息") and url:
     with st.spinner("正在解析..."):
         title, video_url, audio_url = get_bilibili_video_info(url)
@@ -170,9 +166,8 @@ if st.button("🔍 解析视频信息") and url:
             st.session_state.title = title
             st.session_state.video_url = video_url
             st.session_state.audio_url = audio_url
-            st.success(f"✅ 解析成功！")
+            st.success(f"✅ 解析成功！标题：《{title}》")
 
-# 显示视频信息和下载按钮
 if hasattr(st.session_state, 'title'):
     st.write(f"**标题**：{st.session_state.title}")
     col1, col2 = st.columns(2)
@@ -188,12 +183,12 @@ if hasattr(st.session_state, 'title'):
                 success = download_file(st.session_state.video_url, tmp_video, "视频下载")
             # 下载音频
             if success:
-                success = download_file(st.session_session.audio_url, tmp_audio, "音频下载")
+                success = download_file(st.session_state.audio_url, tmp_audio, "音频下载")
             # 合并
             if success:
                 if merge_video_audio(tmp_video, tmp_audio, output_path):
                     st.session_state.output_file = output_path
-                    st.success(f"✅ 合并完成！")
+                    st.success(f"✅ 合并完成！文件已保存至：{output_path}")
                 else:
                     success = False
             # 清理临时文件
@@ -214,3 +209,18 @@ if hasattr(st.session_state, 'title'):
                     file_name=f"{st.session_state.title}.mp4",
                     mime="video/mp4"
                 )
+
+# 显示已下载文件（可选）
+if st.checkbox("查看已下载的视频文件"):
+    files = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.mp4')]
+    if files:
+        selected = st.selectbox("选择文件下载", files)
+        file_path = os.path.join(VIDEO_DIR, selected)
+        with open(file_path, 'rb') as f:
+            st.download_button("📥 下载", f.read(), selected, "video/mp4")
+    else:
+        st.info("暂无已下载的视频文件。")
+
+
+
+
