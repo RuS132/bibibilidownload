@@ -9,7 +9,7 @@ import json
 import requests
 import logging
 import streamlit as st
-import ffmpeg-python as ffmpeg # 使用 ffmpeg-python + Streamlit Cloud 预装 ffmpeg
+import as ffmpeg # 使用 ffmpeg-python + Streamlit Cloud 预装 ffmpeg
 
 # ================ 配置区 =================
 VIDEO_DIR = os.path.join(os.getcwd(), "Bilibili")
