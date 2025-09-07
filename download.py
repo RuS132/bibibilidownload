@@ -99,7 +99,7 @@ def merge_video_audio(video_path, audio_path, output_path):
         )
 
         # 执行
-        ffmpeg.run(stream, overwrite_output=True, timeout=60)
+        ffmpeg.run(stream, overwrite_output=True)
 
         st.success("✅ 合并完成！")
         return True
