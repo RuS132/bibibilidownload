@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-B站音视频下载合并工具 - Streamlit Web 版
-运行命令：streamlit run main.py
+B站音视频下载合并工具 - Streamlit Web 版（已修复 FFmpeg 问题）
 """
 
 import os
@@ -9,18 +8,16 @@ import re
 import json
 import requests
 import logging
-import time
 import streamlit as st
-import ffmpeg  # 替代 moviepy 进行高效合并
+import ffmpeg  # 使用 ffmpeg-python + Streamlit Cloud 预装 ffmpeg
 
 # ================ 配置区 =================
-# 可修改存储目录（默认为当前目录下的 Bilibili）
 VIDEO_DIR = os.path.join(os.getcwd(), "Bilibili")
 os.makedirs(VIDEO_DIR, exist_ok=True)
 
-# Cookie（务必替换为你自己的，否则可能无法下载）
+# 🔴 请务必在部署后通过 Streamlit Secrets 替换以下 Cookie
 # 获取方式：登录B站后，在浏览器开发者工具中复制 Cookie 字符串
-COOKIE = "buvid3=xxx; LIVE_BUVID=xxx; SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx"  # ← 替换为你自己的 Cookie
+COOKIE = "buvid3=xxx; LIVE_BUVID=xxx; SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx"
 
 HEADERS = {
     'Referer': 'https://www.bilibili.com/',
@@ -54,7 +51,7 @@ def get_bilibili_video_info(url):
 
         data = json.loads(playinfo_match.group(1))
         dash = data['data']['dash']
-        video_url = dash['video'][2]['base_url']  # 通常选清晰度较高的
+        video_url = dash['video'][2]['base_url']  # 选清晰度较高的
         audio_url = dash['audio'][2]['base_url']
 
         return title, video_url, audio_url
@@ -80,30 +77,25 @@ def download_file(url, filename, desc="下载中"):
         st.error(f"❌ 下载失败: {e}")
         return False
 
+
 def merge_video_audio(video_path, audio_path, output_path):
-    """使用 ffmpeg 安全合并音视频"""
+    """使用 ffmpeg 快速合并视频与音频"""
     try:
         st.info("⚡ 正在使用 FFmpeg 高速合并音视频...")
-
-        # 明确使用 input
-        video_stream = ffmpeg.input(video_path)
-        audio_stream = ffmpeg.input(audio_path)
-
-        # 构建输出流
-        stream = ffmpeg.output(
-            video_stream, audio_stream,
-            output_path,
-            vcodec='libx264',
-            acodec='aac',
-            loglevel='quiet'
+        (
+            ffmpeg
+            .input(video_path)
+            .input(audio_path)
+            .output(
+                output_path,
+                vcodec='libx264',
+                acodec='aac',
+                loglevel='quiet'
+            )
+            .run(overwrite_output=True)  # ✅ 移除了 timeout 参数
         )
-
-        # 执行
-        ffmpeg.run(stream, overwrite_output=True)
-
         st.success("✅ 合并完成！")
         return True
-
     except Exception as e:
         logging.error(f"合并失败: {e}")
         st.error(f"❌ 合并失败: {e}")
@@ -143,24 +135,21 @@ if hasattr(st.session_state, 'title'):
             output_path = os.path.join(VIDEO_DIR, f"{st.session_state.title}.mp4")
 
             success = True
-            # 下载视频
             if success:
                 success = download_file(st.session_state.video_url, tmp_video, "视频下载")
-            # 下载音频
             if success:
                 success = download_file(st.session_state.audio_url, tmp_audio, "音频下载")
-            # 合并
             if success:
                 if merge_video_audio(tmp_video, tmp_audio, output_path):
                     st.session_state.output_file = output_path
                     st.success(f"✅ 合并完成！文件已保存至：{output_path}")
                 else:
                     success = False
+
             # 清理临时文件
-            if os.path.exists(tmp_video):
-                os.remove(tmp_video)
-            if os.path.exists(tmp_audio):
-                os.remove(tmp_audio)
+            for tmp_file in [tmp_video, tmp_audio]:
+                if os.path.exists(tmp_file):
+                    os.remove(tmp_file)
 
             if not success:
                 st.error("❌ 下载或合并失败，请查看日志。")
@@ -175,7 +164,7 @@ if hasattr(st.session_state, 'title'):
                     mime="video/mp4"
                 )
 
-# 显示已下载文件（可选）
+# 显示已下载文件
 if st.checkbox("查看已下载的视频文件"):
     files = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.mp4')]
     if files:
