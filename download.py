@@ -135,7 +135,7 @@ def show_donate():
     # 假设你的收款码图片放在 images/donate_qr.png
     image_path = "images/donate_qr.png"
     if os.path.exists(image_path):
-        st.image(image_path, caption="微信/支付宝 扫码打赏", use_column_width=True)
+        st.image(image_path, caption="微信/支付宝 扫码打赏", use_container_width=True)
     else:
         st.warning("打赏码图片未找到，请检查 `images/donate_qr.png` 是否存在。")
 
@@ -214,15 +214,3 @@ if hasattr(st.session_state, 'title'):
                     file_name=f"{st.session_state.title}.mp4",
                     mime="video/mp4"
                 )
-"""
-# 显示已下载文件（可选）
-if st.checkbox("查看已下载的视频文件"):
-    files = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.mp4')]
-    if files:
-        selected = st.selectbox("选择文件下载", files)
-        file_path = os.path.join(VIDEO_DIR, selected)
-        with open(file_path, 'rb') as f:
-            st.download_button("📥 下载", f.read(), selected, "video/mp4")
-    else:
-        st.info("暂无已下载的视频文件。")
-"""
