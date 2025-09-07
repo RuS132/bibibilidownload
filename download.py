@@ -174,3 +174,20 @@ if st.checkbox("查看已下载的视频文件"):
             st.download_button("📥 下载", f.read(), selected, "video/mp4")
     else:
         st.info("暂无已下载的视频文件。")
+
+
+if st.button("🔍 检查 ffmpeg 包"):
+    try:
+        import ffmpeg
+        st.write("📁 路径:", ffmpeg.__file__)
+        st.write("🔧 类型:", type(ffmpeg))
+        
+        # 尝试创建 input
+        try:
+            stream = ffmpeg.input("test.mp4")
+            st.success("✅ ffmpeg.input() 可用！包正确。")
+        except Exception as e:
+            st.error(f"❌ ffmpeg.input() 失败: {e}")
+            
+    except Exception as e:
+        st.error(f"❌ 无法导入 ffmpeg: {e}")
