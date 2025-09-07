@@ -7,7 +7,6 @@ B站音视频下载合并工具 - Streamlit Web 版
 import os
 import re
 import json
-import time
 import requests
 import logging
 import streamlit as st
@@ -119,35 +118,8 @@ def merge_video_audio(video_path, audio_path, output_path):
 
 
 # ================ Streamlit 主界面 =================
-# 设置页面配置
 st.set_page_config(page_title="B站视频下载器", page_icon="🎬", layout="centered")
-
-# 打赏弹窗函数
-@st.dialog("支持作者")
-def show_donate():
-    st.markdown("### 🎉 感谢使用！")
-    st.markdown("如果你觉得本工具对你有帮助，欢迎请作者喝杯咖啡 ☕")
-    st.markdown("---")
-    
-    # 假设你的收款码图片放在 images/donate_qr.png
-    image_path = "images/donate_qr.png"
-    if os.path.exists(image_path):
-        st.image(image_path, caption="微信/支付宝 扫码打赏", use_container_width=True)
-    else:
-        st.warning("打赏码图片未找到，请检查 `images/donate_qr.png` 是否存在。")
-
-    st.markdown("🙏 感谢你的支持，这将鼓励我开发更多实用工具！")
-
-# 页面标题
-st.title("🎬 B站视频下载工具")
-
-# 右上角添加打赏按钮
-col1, col2 = st.columns([8, 2])
-with col2:
-    if st.button("💖 打赏支持"):
-        show_donate()
-
-
+st.title("🎬 B站音视频下载合并工具")
 
 st.markdown("""
 > 输入 B站视频链接（如 `https://www.bilibili.com/video/BVxxxx`），自动下载并合并高清音视频。
@@ -220,7 +192,3 @@ if st.checkbox("查看已下载的视频文件"):
             st.download_button("📥 下载", f.read(), selected, "video/mp4")
     else:
         st.info("暂无已下载的视频文件。")
-
-
-
-
