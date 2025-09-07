@@ -11,8 +11,7 @@ import requests
 import logging
 import time
 import streamlit as st
-from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.audio.io.AudioFileClip import AudioFileClip
+import ffmpeg  # 替代 moviepy 进行高效合并
 
 # ================ 配置区 =================
 # 可修改存储目录（默认为当前目录下的 Bilibili）
@@ -82,19 +81,26 @@ def download_file(url, filename, desc="下载中"):
         return False
 
 def merge_video_audio(video_path, audio_path, output_path):
-    """合并视频与音频"""
+    """使用 ffmpeg 快速合并视频与音频"""
     try:
-        st.info("正在合并音视频...")
-        video = VideoFileClip(video_path)
-        audio = AudioFileClip(audio_path)
-        final_video = video.set_audio(audio)
-        final_video.write_videofile(output_path, logger=None, codec='libx264', audio_codec='aac')
-        video.close()
-        audio.close()
+        st.info("⚡ 正在使用 FFmpeg 高速合并音视频...")
+        (
+            ffmpeg
+            .input(video_path)
+            .input(audio_path)
+            .output(
+                output_path,
+                vcodec='libx264',      # 视频编码
+                acodec='aac',          # 音频编码
+                loglevel='quiet'       # 不输出冗余日志
+            )
+            .run(overwrite_output=True, timeout=60)  # 设置超时防止卡死
+        )
+        st.success("✅ 合并完成！")
         return True
     except Exception as e:
         logging.error(f"合并失败: {e}")
-        st.error(f"合并失败: {e}")
+        st.error(f"❌ 合并失败: {e}")
         return False
 
 
